@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>낙하 블록 (가로줄만 제거)</title>
+<style>
+  html,body{margin:0;padding:0;background:#fff;color:#111;font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .bar{display:flex;gap:12px;align-items:center;padding:8px 10px;border-bottom:1px solid #ddd}
+  #c{display:block;margin:0 auto;background:#fafafa}
+  .over{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.6);color:#fff;gap:12px;z-index:10}
+  .over[hidden]{display:none}
+  .over .card{background:#111;border:1px solid #333;border-radius:10px;padding:10px;max-width:min(520px,90%);text-align:center}
+  .over img{max-width:100%;height:auto;border-radius:8px;display:block;margin:0 auto 8px}
+  .over p{margin:0 0 10px}
+  .over .btn{appearance:none;border:1px solid #444;background:#fff;color:#111;border-radius:8px;padding:8px 12px;font-weight:700;cursor:pointer}
+  .over .btn:hover{filter:brightness(0.95)}
+  a.btn{color:#111;text-decoration:underline;cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="bar">
+    <div>점수: <span id="sc">0</span></div>
+    <div>|</div>
+    <a class="btn" id="reset">다시 시작</a>
+    <div style="margin-left:auto;opacity:.7">마우스로 열 선택 · 클릭/Space: 즉시 낙하</div>
+  </div>
+
+  <canvas id="c" width="360" height="540" aria-label="board"></canvas>
+
+  <div id="over" class="over" hidden>
+    <div class="card">
+      <img id="meme" alt="game over meme">
+      <p id="msg">게임 오버!</p>
+      <button class="btn" id="again">다시 시작</button>
+    </div>
+  </div>
+
+<script>
+let data=`meme1.jpg|진짜 아프지 마세요...
+meme2.jpg|생각해서는 안된다는 걸.
+meme3.jpg|뭘 모르는구나
+meme4.jpg|으악…
+meme5.jpg|나가주세요
+meme6.jpg|괜찮으시겠어요?
+meme7.jpg|패배를 인정한다
+meme8.jpg|패배를 인정하는가?
+meme9.jpg|내가 졌다!
+meme10.jpg|패배의 최고중의 최고
+meme11.jpg|오늘은 여기까지다…`
+const MEMES=data.split(/\n+/).map(s=>{const [src,text]=s.trim().split("|");return {src,text}})
+const COLS=8, ROWS=12, CELL=40, GAP=2
+const DROP_START=0.9
+const SHAPES=[
+  [[0,0]], [[0,0],[1,0]], [[0,0],[1,0],[2,0]], [[0,0],[1,0],[2,0],[3,0]],
+  [[0,0],[0,1],[1,0],[1,1]], [[0,0],[0,1],[1,1]], [[0,0],[1,0],[2,0],[1,1]], [[0,0],[1,0],[0,1]]
+]
+let board, score, speed, running, last, mouseCol, current, hardDrop
+const cv=document.getElementById('c'), ctx=cv.getContext('2d')
+const scEl=document.getElementById('sc')
+const overEl=document.getElementById('over')
+const memeEl=document.getElementById('meme')
+const msgEl=document.getElementById('msg')
+const inB=(x,y)=>x>=0&&y>=0&&x<COLS&&y<ROWS
+const newBoard=()=>Array.from({length:ROWS},()=>Array(COLS).fill(0))
+const cellPos=(x,y)=>({x: x*(CELL+GAP)+GAP, y: y*(CELL+GAP)+GAP})
+function canPlace(shape, ox, oy){
+  for(const [dx,dy] of shape){const x=ox+dx,y=oy+dy;if(!inB(x,y)||board[y][x])return false}
+  return true
+}
+function place(shape, ox, oy){
+  for(const [dx,dy] of shape){board[oy+dy][ox+dx]=1;score+=1}
+  clearFullRows()
+}
+function clearFullRows(){
+  let cleared=0
+  for(let y=ROWS-1;y>=0;y--){
+    if(board[y].every(v=>v===1)){board.splice(y,1);board.unshift(Array(COLS).fill(0));cleared++;y++}
+  }
+  if(cleared)score+=cleared*10
+}
+function landingY(shape, ox){
+  let oy=0;while(canPlace(shape,ox,oy))oy++;oy--;return oy>=0?oy:null
+}
+function spawn(){
+  const shape=SHAPES[Math|Math.random()*SHAPES.length]
+  let minx=1e9,maxx=-1e9;shape.forEach(([x])=>{if(x<minx)minx=x;if(x>maxx)maxx=x})
+  const w=maxx-minx+1
+  let x=Math.min(Math.max((mouseCol??(COLS>>1))-(w>>1),0),COLS-w)
+  const ly=landingY(shape,x)
+  if(ly===null){showGameOver();return}
+  current={shape,x,yFloat:-1,landY:ly}
+}
+function lock(){place(current.shape,current.x,current.landY);current=null;speed=Math.min(speed+0.05,3);spawn()}
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height)
+  ctx.fillStyle="#eaeaea";ctx.fillRect(0,0,cv.width,cv.height)
+  for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){
+    const {x:px,y:py}=cellPos(x,y)
+    ctx.fillStyle=board[y][x]?"#4b8cf0":"#fff"
+    ctx.fillRect(px,py,CELL,CELL)
+    ctx.strokeStyle="#d0d0d0";ctx.strokeRect(px,py,CELL,CELL)
+  }
+  if(current){
+    ctx.fillStyle="rgba(80,180,80,0.25)"
+    for(const [dx,dy] of current.shape){const {x:px,y:py}=cellPos(current.x+dx,current.landY+dy);ctx.fillRect(px,py,CELL,CELL)}
+    ctx.fillStyle="rgba(120,80,200,0.35)"
+    for(const [dx,dy] of current.shape){const {x:px,y:py}=cellPos(current.x+dx,current.yFloat+dy);ctx.fillRect(px,py,CELL,CELL);ctx.strokeStyle="rgba(0,0,0,0.2)";ctx.strokeRect(px,py,CELL,CELL)}
+  }
+}
+cv.addEventListener('mousemove',e=>{
+  const r=cv.getBoundingClientRect()
+  const gx=e.clientX-r.left
+  const step=CELL+GAP
+  let col=Math.floor((gx-GAP)/step);if(col<0)col=0;if(col>COLS-1)col=COLS-1
+  mouseCol=col
+  if(current){
+    let minx=1e9,maxx=-1e9;current.shape.forEach(([x])=>{if(x<minx)minx=x;if(x>maxx)maxx=x})
+    const w=maxx-minx+1
+    const targetX=Math.min(Math.max(col-(w>>1),0),COLS-w)
+    if(targetX!==current.x){current.x=targetX;const ly=landingY(current.shape,current.x);if(ly!==null)current.landY=ly}
+  }
+})
+addEventListener('click',()=>hardDrop=true)
+addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();hardDrop=true}})
+function hud(){scEl.textContent=score}
+function tick(ts){
+  if(!running)return
+  if(!last)last=ts
+  const dt=(ts-last)/1000;last=ts
+  if(current){
+    const v=hardDrop?20:speed
+    current.yFloat+=v*dt
+    if(current.yFloat>=current.landY){hardDrop=false;lock()}
+  }
+  draw();hud()
+  requestAnimationFrame(tick)
+}
+function showGameOver(){
+  running=false
+  const pick=MEMES[Math.floor(Math.random()*MEMES.length)]
+  memeEl.src=pick.src
+  msgEl.textContent=pick.text
+  overEl.hidden=false
+}
+function reset(){
+  overEl.hidden=true
+  board=newBoard();score=0;speed=DROP_START;running=true;last=0;hardDrop=false;mouseCol=COLS>>1
+  spawn();draw();hud();requestAnimationFrame(tick)
+}
+document.getElementById('reset').onclick=reset
+document.getElementById('again').onclick=reset
+reset()
+</script>
+</body>
+</html>
